@@ -1,6 +1,6 @@
 # Ebook RAG Explorer
 
-A RAG application with FastAPI backend that indexes EPUB/PDF ebooks via sentence-transformers into **PostgreSQL with pgvector**, retrieves with **hybrid search (vector similarity + full-text search)**, and generates answers using a configurable LLM.
+A RAG application with FastAPI backend that indexes EPUB/PDF ebooks via sentence-transformers into **PostgreSQL with pgvector**, retrieves with **hybrid search (vector similarity + full-text search)**, generates answers using a configurable LLM, and provides a **Streamlit frontend** for easy interaction.
 
 ## Features
 
@@ -10,6 +10,7 @@ A RAG application with FastAPI backend that indexes EPUB/PDF ebooks via sentence
 - **LLM Integration**: Configurable support for OpenAI, Azure OpenAI, LM Studio
 - **Hexagonal Architecture**: Clean separation with Ports, Adapters, and Services
 - **Collections**: Organize books into user-defined collections
+- **Streamlit Frontend**: User-friendly web interface with dark/light theme
 - **Container-Native**: Designed for Podman/Docker deployment
 
 ## Architecture
@@ -57,17 +58,28 @@ cp .env.example .env
 ### 2. Start the Stack
 
 ```bash
-# Start PostgreSQL and Backend
+# Start all services (PostgreSQL, Backend, Streamlit)
 podman-compose up -d
 
 # View logs
 podman-compose logs -f backend
+podman-compose logs -f streamlit
 
-# Check health
+# Check API health
 curl http://localhost:8000/health
 ```
 
-### 3. Use the API
+### 3. Access the Frontend
+
+Open your browser at: **http://localhost:8501**
+
+The Streamlit frontend provides:
+- **🔍 Search Tab**: Ask questions and see prominent source citations
+- **📚 Books Tab**: View and manage indexed books
+- **📁 Collections Tab**: Organize books into collections
+- **⬆️ Upload Tab**: Drag-and-drop PDF/EPUB files
+
+### 4. Use the API Directly
 
 ```bash
 # Index a book
@@ -90,7 +102,7 @@ curl "http://localhost:8000/api/books"
 curl -X DELETE "http://localhost:8000/api/books/{book_id}"
 ```
 
-### 4. Stop the Stack
+### 5. Stop the Stack
 
 ```bash
 podman-compose down
@@ -98,6 +110,39 @@ podman-compose down
 # To also remove volumes (database data):
 podman-compose down -v
 ```
+
+## Frontend Features
+
+### 🔍 Search Tab
+- Natural language query input
+- Collection filter dropdown
+- **Prominent source display** with:
+  - Color-coded relevance scores (🟢 Excellent, 🟡 Good, 🟠 Moderate, 🔴 Low)
+  - Expandable source cards showing content preview
+  - Page, chapter, and source metadata
+- LLM-generated answer with citations
+
+### 📚 Books Tab
+- Table view of all indexed books
+- Format, chunk count, and collection info
+- Delete with confirmation dialog
+- Filter by collection
+
+### 📁 Collections Tab
+- Card grid with book/chunk counts
+- Delete collections (cascades to books)
+- Visual organization of content
+
+### ⬆️ Upload Tab
+- Drag-and-drop file upload
+- Support for PDF and EPUB formats
+- Collection assignment
+- Upload status feedback
+
+### Theme Toggle
+- Dark/Light theme switch in sidebar
+- Custom CSS styling for each theme
+- Non-persistent (resets on refresh)
 
 ## Development Setup
 
@@ -113,8 +158,8 @@ podman-compose up -d postgres
 # Run the API server
 uv run uvicorn ebook_rag_explorer.api.app:create_app --reload
 
-# Or use tox
-tox -e serve
+# In a separate terminal, run the Streamlit frontend
+uv run streamlit run src/ebook_rag_explorer/frontend/main.py
 ```
 
 ### Running Tests
@@ -140,6 +185,8 @@ tox -e integration
 
 ## Configuration
 
+### Backend Environment Variables
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql+asyncpg://raguser:ragpassword@localhost:5432/ragdb` | Database connection |
@@ -157,37 +204,62 @@ tox -e integration
 | `CHUNK_SIZE` | `1000` | Text chunk size in characters |
 | `CHUNK_OVERLAP` | `200` | Overlap between chunks |
 
+### Frontend Configuration
+
+The frontend is configured in `src/ebook_rag_explorer/frontend/config.py`:
+- Default API URL: `http://localhost:8000`
+- Configurable via sidebar UI
+
 ## API Endpoints
 
-- `POST /api/index` - Upload and index PDF/EPUB files
-- `POST /api/search` - Hybrid search with RAG
-- `GET /api/books` - List all indexed books
-- `DELETE /api/books/{id}` - Delete a book
-- `GET /api/collections` - List collections
-- `DELETE /api/collections/{id}` - Delete a collection
-- `GET /health` - Health check
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/index` | POST | Upload and index PDF/EPUB files |
+| `/api/search` | POST | Hybrid search with RAG |
+| `/api/books` | GET | List all indexed books |
+| `/api/books/{id}` | DELETE | Delete a book |
+| `/api/collections` | GET | List collections |
+| `/api/collections/{id}` | DELETE | Delete a collection |
+| `/health` | GET | Health check |
 
 ## Database Schema
 
 The application uses PostgreSQL with pgvector extension:
 
 ```sql
+-- Books table
+CREATE TABLE books (
+    id VARCHAR(255) PRIMARY KEY,
+    title VARCHAR(500),
+    author VARCHAR(255),
+    format VARCHAR(50),
+    collection_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    chunk_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Documents table with hybrid search
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
     chunk_id VARCHAR(255) UNIQUE NOT NULL,
-    book_id VARCHAR(255) REFERENCES books(id),
+    book_id VARCHAR(255) REFERENCES books(id) ON DELETE CASCADE,
     collection_id VARCHAR(255),
     content TEXT NOT NULL,
     embedding VECTOR(384),  -- For all-MiniLM-L6-v2
-    search_vector tsvector, -- For full-text search
-    -- ... metadata columns
+    search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', COALESCE(content, '')), 'A')
+    ) STORED,
+    chunk_index INTEGER DEFAULT 0,
+    total_chunks INTEGER DEFAULT 0,
+    source_metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for performance
-CREATE INDEX idx_documents_embedding ON documents 
-    USING ivfflat (embedding vector_cosine_ops);
-CREATE INDEX idx_documents_search ON documents 
+CREATE INDEX idx_documents_embedding ON documents
+    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_documents_search ON documents
     USING GIN (search_vector);
 ```
 
@@ -195,24 +267,36 @@ CREATE INDEX idx_documents_search ON documents
 
 ```
 ebook-rag-explorer/
-├── compose.yaml           # Podman Compose stack
-├── Containerfile          # Backend container image
+├── compose.yaml              # Podman Compose stack (postgres + backend + streamlit)
+├── Containerfile             # Container image build
 ├── init-db/
-│   └── 01-init.sql      # Database schema
+│   └── 01-init.sql           # Database schema with pgvector
 ├── src/
 │   └── ebook_rag_explorer/
-│       ├── adapters/     # Concrete implementations
-│       │   ├── parsers/  # PDF/EPUB parsers
+│       ├── adapters/          # Concrete implementations
+│       │   ├── parsers/       # PDF/EPUB parsers
 │       │   ├── vectorstore/
 │       │   │   └── postgres_adapter.py  # PostgreSQL + pgvector
 │       │   ├── retrieval/
 │       │   │   ├── postgres_retriever.py # Hybrid search
 │       │   │   └── cross_encoder_reranker.py
 │       │   └── llm/
-│       ├── services/     # Business logic
-│       ├── ports/        # Abstract interfaces
-│       └── api/          # FastAPI application
+│       ├── services/          # Business logic
+│       ├── ports/             # Abstract interfaces
+│       ├── api/               # FastAPI application
+│       └── frontend/          # Streamlit web interface
+│           ├── main.py        # App entry point
+│           ├── api_client.py  # API client wrapper
+│           ├── config.py      # Frontend configuration
+│           ├── styles.py      # Dark/light CSS themes
+│           └── components/     # UI components
+│               ├── search.py
+│               ├── books.py
+│               ├── collections.py
+│               └── upload.py
 └── tests/
+    ├── unit/                  # Unit tests
+    └── integration/           # Integration tests with testcontainers
 ```
 
 ## License
