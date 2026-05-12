@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
-from testcontainers.postgres import PostgresContainer
 
 from ebook_rag_explorer.adapters.embedding.sentence_transformer_adapter import (
     SentenceTransformerAdapter,
@@ -20,31 +19,7 @@ from ebook_rag_explorer.adapters.retrieval.postgres_retriever import PostgresRet
 from ebook_rag_explorer.adapters.vectorstore.postgres_adapter import PostgresAdapter
 from ebook_rag_explorer.api.app import create_app
 from ebook_rag_explorer.config import Settings, reset_settings
-from ebook_rag_explorer.services.chunking_service import ChunkingService
-from ebook_rag_explorer.services.indexing_service import IndexingService
 from ebook_rag_explorer.services.retrieval_service import RetrievalService
-
-
-@pytest.fixture(scope="module")
-def postgres_container():
-    """Create a PostgreSQL container with pgvector."""
-    with PostgresContainer("docker.io/pgvector/pgvector:pg16") as postgres:
-        postgres.exec(f"psql -U {postgres.username} -d {postgres.dbname} -c 'CREATE EXTENSION IF NOT EXISTS vector;'")
-        yield postgres
-
-
-@pytest.fixture
-def db_url(postgres_container):
-    """Get the async database URL."""
-    sync_url = postgres_container.get_connection_url()
-    import re
-    match = re.match(r"postgresql\+psycopg2://(.+):(.+)@(.+):(\d+)/(.+)", sync_url)
-    if match:
-        user, password, host, port, db = match.groups()
-        async_url = f"postgresql://{user}:{password}@{host}:{port}/{db}"
-    else:
-        async_url = sync_url.replace("postgresql+psycopg2://", "postgresql://")
-    return async_url
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +79,7 @@ def mock_reranker():
     return reranker
 
 
-def create_test_app(db_url: str, mock_embedder, mock_llm, mock_reranker):
+def create_test_app(db_url: str, mock_embedder, mock_llm, mock_reranker, adapter):
     """Create a test FastAPI app with mocked dependencies."""
     from ebook_rag_explorer.api import dependencies
 
@@ -120,12 +95,10 @@ def create_test_app(db_url: str, mock_embedder, mock_llm, mock_reranker):
         rerank_top_n=3,
     )
 
-    # Set up dependencies
-    vector_store = PostgresAdapter(db_url)
-    dependencies.set_vector_store(vector_store)
+    dependencies.set_vector_store(adapter)
     dependencies.set_embedder(mock_embedder)
 
-    retriever = PostgresRetriever(vector_store, mock_embedder)
+    retriever = PostgresRetriever(adapter, mock_embedder)
     retrieval_service = RetrievalService(
         retriever=retriever,
         reranker=mock_reranker,
@@ -136,68 +109,15 @@ def create_test_app(db_url: str, mock_embedder, mock_llm, mock_reranker):
     dependencies.set_retrieval_service(retrieval_service)
 
     app = create_app(settings)
-    return app, vector_store
-
-
-async def init_schema(adapter: PostgresAdapter):
-    """Initialize the database schema."""
-    pool = await adapter._get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS books (
-                id VARCHAR(255) PRIMARY KEY,
-                title VARCHAR(500),
-                author VARCHAR(255),
-                format VARCHAR(50),
-                collection_id VARCHAR(255),
-                metadata JSONB DEFAULT '{}',
-                chunk_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id SERIAL PRIMARY KEY,
-                chunk_id VARCHAR(255) NOT NULL UNIQUE,
-                book_id VARCHAR(255) REFERENCES books(id) ON DELETE CASCADE,
-                collection_id VARCHAR(255),
-                content TEXT NOT NULL,
-                embedding VECTOR(384),
-                search_vector tsvector GENERATED ALWAYS AS (
-                    setweight(to_tsvector('english', COALESCE(content, '')), 'A')
-                ) STORED,
-                chunk_index INTEGER DEFAULT 0,
-                total_chunks INTEGER DEFAULT 0,
-                source_metadata JSONB DEFAULT '{}',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
-
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_books_collection ON books(collection_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_book_id ON documents(book_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10)")
-
-        await conn.execute("""
-            CREATE OR REPLACE VIEW collection_stats AS
-            SELECT
-                collection_id AS id,
-                collection_id AS name,
-                COUNT(DISTINCT book_id) AS book_count,
-                COUNT(*) AS chunk_count
-            FROM documents
-            WHERE collection_id IS NOT NULL
-            GROUP BY collection_id
-        """)
+    return app
 
 
 class TestHealthEndpoint:
     """Tests for the health check endpoint."""
 
-    def test_health_check(self, db_url, mock_embedder, mock_llm, mock_reranker):
+    def test_health_check(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test the health check endpoint."""
-        app, _ = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
         client = TestClient(app)
 
         response = client.get("/health")
@@ -208,12 +128,10 @@ class TestHealthEndpoint:
 class TestIndexEndpoint:
     """Tests for the index endpoint."""
 
-    async def test_index_pdf_success(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_index_pdf_success(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test successfully indexing a PDF file."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
 
-        # Mock fitz for PDF parsing
         with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
             mock_doc = MagicMock()
             mock_doc.metadata = {"title": "Test Book", "author": "Test Author"}
@@ -228,7 +146,6 @@ class TestIndexEndpoint:
 
             mock_fitz.return_value = mock_doc
 
-            # Create test file
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 tmp.write(b"dummy pdf content")
                 tmp_path = Path(tmp.name)
@@ -247,12 +164,11 @@ class TestIndexEndpoint:
             assert data["title"] == "Test Book"
             assert "book_id" in data
 
-            # Cleanup
             tmp_path.unlink()
 
-    def test_index_unsupported_format(self, db_url, mock_embedder, mock_llm, mock_reranker):
+    def test_index_unsupported_format(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test indexing an unsupported file format."""
-        app, _ = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
         client = TestClient(app)
 
         response = client.post(
@@ -267,24 +183,19 @@ class TestIndexEndpoint:
 class TestSearchEndpoint:
     """Tests for the search endpoint."""
 
-    async def test_search_success(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_search_success(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test successful search."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
 
-        # Mock fitz for indexing
         with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
             mock_doc = MagicMock()
             mock_doc.metadata = {"title": "Test Book"}
             mock_doc.__len__ = MagicMock(return_value=1)
-
             mock_page = MagicMock()
             mock_page.get_text.return_value = "Python programming is great for data science."
-
             mock_doc.__enter__ = MagicMock(return_value=mock_doc)
             mock_doc.__exit__ = MagicMock(return_value=False)
             mock_doc.__getitem__ = MagicMock(return_value=mock_page)
-
             mock_fitz.return_value = mock_doc
 
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -301,7 +212,6 @@ class TestSearchEndpoint:
 
             tmp_path.unlink()
 
-        # Now search
         response = client.post(
             "/api/search",
             json={"query": "What is Python used for?"},
@@ -317,13 +227,10 @@ class TestSearchEndpoint:
 class TestBooksEndpoint:
     """Tests for the books endpoint."""
 
-    async def test_list_books_empty(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_list_books_empty(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test listing books when none are indexed."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
-
-        # Clear any existing data
-        await vector_store.clear()
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
+        await adapter.clear()
 
         client = TestClient(app)
         response = client.get("/api/books")
@@ -331,11 +238,9 @@ class TestBooksEndpoint:
         assert response.status_code == 200
         assert response.json() == []
 
-    async def test_delete_book_not_found(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_delete_book_not_found(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test deleting a non-existent book."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
-
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
         client = TestClient(app)
         response = client.delete("/api/books/non-existent-id")
 
@@ -345,11 +250,10 @@ class TestBooksEndpoint:
 class TestCollectionsEndpoint:
     """Tests for the collections endpoint."""
 
-    async def test_list_collections_empty(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_list_collections_empty(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test listing collections when none exist."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
-        await vector_store.clear()
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
+        await adapter.clear()
 
         client = TestClient(app)
         response = client.get("/api/collections")
@@ -357,11 +261,9 @@ class TestCollectionsEndpoint:
         assert response.status_code == 200
         assert response.json() == []
 
-    async def test_index_with_collection(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_index_with_collection(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test indexing a document with a collection."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
-        await vector_store.clear()
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
 
         with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
             mock_doc = MagicMock()
@@ -390,18 +292,15 @@ class TestCollectionsEndpoint:
             assert response.status_code == 200
             tmp_path.unlink()
 
-        # List collections
         response = client.get("/api/collections")
         assert response.status_code == 200
         collections = response.json()
         assert len(collections) == 1
         assert collections[0]["id"] == "testcollection"
 
-    async def test_delete_collection_not_found(self, db_url, mock_embedder, mock_llm, mock_reranker, postgres_container):
+    async def test_delete_collection_not_found(self, db_url, mock_embedder, mock_llm, mock_reranker, adapter):
         """Test deleting a non-existent collection."""
-        app, vector_store = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker)
-        await init_schema(vector_store)
-
+        app = create_test_app(db_url, mock_embedder, mock_llm, mock_reranker, adapter)
         client = TestClient(app)
         response = client.delete("/api/collections/non-existent")
 
