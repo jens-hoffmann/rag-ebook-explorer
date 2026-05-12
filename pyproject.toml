@@ -27,10 +27,9 @@ dependencies = [
     "streamlit>=1.40.0",
     "httpx>=0.27.0",
     
-    # LangChain & Vector Store
+    # LangChain
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
-    "langchain-chroma>=0.1.0",
     "langchain-huggingface>=0.1.0",
     "langchain-text-splitters>=0.3.0",
     "langchain-openai>=0.2.0",
@@ -38,8 +37,10 @@ dependencies = [
     # Embeddings & Reranking
     "sentence-transformers>=3.2.0",
     
-    # Vector Store
-    "chromadb>=0.5.0",
+    # Database (PostgreSQL + pgvector)
+    "asyncpg>=0.29.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "pgvector>=0.2.5",
     
     # Document Parsing
     "pymupdf>=1.24.0",

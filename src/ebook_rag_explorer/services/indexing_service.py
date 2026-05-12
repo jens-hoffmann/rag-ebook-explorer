@@ -7,28 +7,28 @@ from langchain_core.documents import Document
 
 from ebook_rag_explorer.adapters.parsers.epub_parser import EpubParser
 from ebook_rag_explorer.adapters.parsers.pdf_parser import PdfParser
+from ebook_rag_explorer.adapters.vectorstore.postgres_adapter import PostgresAdapter
 from ebook_rag_explorer.ports.embedder_port import Embedder
 from ebook_rag_explorer.ports.parser_port import EbookParser
-from ebook_rag_explorer.ports.vectorstore_port import VectorStore
 from ebook_rag_explorer.services.chunking_service import ChunkingService
 
 
 class IndexingService:
-    """Service for indexing ebooks into the vector store."""
+    """Service for indexing ebooks into the PostgreSQL database."""
 
     # Registry of available parsers
     PARSERS: list[type[EbookParser]] = [PdfParser, EpubParser]
 
     def __init__(
         self,
-        vector_store: VectorStore,
+        vector_store: PostgresAdapter,
         embedder: Embedder,
         chunking_service: ChunkingService,
     ) -> None:
         """Initialize the indexing service.
 
         Args:
-            vector_store: The vector store to save documents to.
+            vector_store: The PostgreSQL vector store.
             embedder: The embedder to generate embeddings.
             chunking_service: Service for chunking documents.
         """
@@ -57,13 +57,13 @@ class IndexingService:
 
         raise ValueError(f"Unsupported file format: {extension}")
 
-    def index_book(
+    async def index_book(
         self,
         file_path: Path,
         book_id: str | None = None,
         collection_id: str | None = None,
     ) -> dict:
-        """Index an ebook file into the vector store.
+        """Index an ebook file into the PostgreSQL database.
 
         This orchestrates the full pipeline: parse → chunk → embed → store.
 
@@ -74,14 +74,7 @@ class IndexingService:
             collection_id: Optional collection to organize the book into.
 
         Returns:
-            Dictionary with indexing results:
-            {
-                "book_id": str,
-                "title": str | None,
-                "format": str,
-                "chunks_indexed": int,
-                "collection_id": str | None,
-            }
+            Dictionary with indexing results.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -128,8 +121,8 @@ class IndexingService:
         texts = [chunk.page_content for chunk in chunks]
         embeddings = self.embedder.embed_documents(texts)
 
-        # Step 4: Store (with collection_id)
-        self.vector_store.add_documents(chunks, embeddings, book_id, collection_id)
+        # Step 4: Store (async)
+        await self.vector_store.add_documents(chunks, embeddings, book_id, collection_id)
 
         return {
             "book_id": book_id,
@@ -139,7 +132,7 @@ class IndexingService:
             "collection_id": collection_id,
         }
 
-    def delete_book(self, book_id: str) -> bool:
+    async def delete_book(self, book_id: str) -> bool:
         """Delete a book from the index.
 
         Args:
@@ -148,25 +141,25 @@ class IndexingService:
         Returns:
             True if the book was found and deleted, False otherwise.
         """
-        return self.vector_store.delete_book(book_id)
+        return await self.vector_store.delete_book(book_id)
 
-    def list_books(self) -> list[dict]:
+    async def list_books(self) -> list[dict]:
         """List all indexed books.
 
         Returns:
             List of book information dictionaries.
         """
-        return self.vector_store.list_books()
+        return await self.vector_store.list_books()
 
-    def list_collections(self) -> list[dict]:
+    async def list_collections(self) -> list[dict]:
         """List all collections.
 
         Returns:
             List of collection information dictionaries.
         """
-        return self.vector_store.list_collections()
+        return await self.vector_store.list_collections()
 
-    def delete_collection(self, collection_id: str) -> bool:
+    async def delete_collection(self, collection_id: str) -> bool:
         """Delete a collection and all its books.
 
         Args:
@@ -175,4 +168,4 @@ class IndexingService:
         Returns:
             True if the collection was found and deleted, False otherwise.
         """
-        return self.vector_store.delete_collection(collection_id)
+        return await self.vector_store.delete_collection(collection_id)

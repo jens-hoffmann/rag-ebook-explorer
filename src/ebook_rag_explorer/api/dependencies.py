@@ -2,18 +2,24 @@
 
 from fastapi import Request
 
+from ebook_rag_explorer.adapters.embedding.sentence_transformer_adapter import (
+    SentenceTransformerAdapter,
+)
+from ebook_rag_explorer.adapters.vectorstore.postgres_adapter import PostgresAdapter
 from ebook_rag_explorer.ports.embedder_port import Embedder
 from ebook_rag_explorer.ports.vectorstore_port import VectorStore
+from ebook_rag_explorer.services.chunking_service import ChunkingService
 from ebook_rag_explorer.services.indexing_service import IndexingService
 from ebook_rag_explorer.services.retrieval_service import RetrievalService
 
 # Global instances (set during app lifespan)
-_vector_store: VectorStore | None = None
+_vector_store: PostgresAdapter | None = None
 _embedder: Embedder | None = None
 _retrieval_service: RetrievalService | None = None
+_settings = None
 
 
-def set_vector_store(store: VectorStore) -> None:
+def set_vector_store(store: PostgresAdapter) -> None:
     """Set the global vector store instance."""
     global _vector_store
     _vector_store = store
@@ -31,11 +37,17 @@ def set_retrieval_service(service: RetrievalService) -> None:
     _retrieval_service = service
 
 
-def get_vector_store() -> VectorStore:
+def set_settings(settings) -> None:
+    """Set the global settings instance."""
+    global _settings
+    _settings = settings
+
+
+def get_vector_store() -> PostgresAdapter:
     """Get the vector store instance.
 
     Returns:
-        The configured vector store.
+        The configured PostgresAdapter.
 
     Raises:
         RuntimeError: If vector store hasn't been initialized.
@@ -85,7 +97,6 @@ def get_indexing_service(request: Request) -> IndexingService:
         A new IndexingService instance.
     """
     from ebook_rag_explorer.config import get_settings
-    from ebook_rag_explorer.services.chunking_service import ChunkingService
 
     settings = get_settings()
 

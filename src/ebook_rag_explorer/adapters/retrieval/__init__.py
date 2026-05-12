@@ -1,8 +1,8 @@
 """Retrieval adapters module."""
 
-from ebook_rag_explorer.adapters.retrieval.chroma_retriever import ChromaRetriever
 from ebook_rag_explorer.adapters.retrieval.cross_encoder_reranker import (
     CrossEncoderReranker,
 )
+from ebook_rag_explorer.adapters.retrieval.postgres_retriever import PostgresRetriever
 
-__all__ = ["ChromaRetriever", "CrossEncoderReranker"]
+__all__ = ["PostgresRetriever", "CrossEncoderReranker"]

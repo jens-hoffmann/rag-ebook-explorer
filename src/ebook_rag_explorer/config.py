@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     """Sentence-transformers compatible model for document embeddings."""
 
+    embedding_dimension: int = 384
+    """Dimension of the embedding vectors (384 for all-MiniLM-L6-v2)."""
+
     # -------------------------------------------------------------------------
     # Reranking Configuration
     # -------------------------------------------------------------------------
@@ -44,15 +47,43 @@ class Settings(BaseSettings):
     """API key for OpenAI or Azure OpenAI."""
 
     # -------------------------------------------------------------------------
-    # ChromaDB Configuration
+    # Database Configuration (PostgreSQL + pgvector)
     # -------------------------------------------------------------------------
-    chroma_persist_dir: str = "./chroma_data"
-    """Directory for ChromaDB persistence."""
+    database_url: str = "postgresql+asyncpg://raguser:ragpassword@localhost:5432/ragdb"
+    """Database connection URL (asyncpg driver)."""
 
-    @property
-    def chroma_persist_path(self) -> Path:
-        """Return the ChromaDB persistence directory as a Path."""
-        return Path(self.chroma_persist_dir)
+    postgres_host: str = "localhost"
+    """PostgreSQL host."""
+
+    postgres_port: int = 5432
+    """PostgreSQL port."""
+
+    postgres_user: str = "raguser"
+    """PostgreSQL username."""
+
+    postgres_password: str = "ragpassword"
+    """PostgreSQL password."""
+
+    postgres_db: str = "ragdb"
+    """PostgreSQL database name."""
+
+    # -------------------------------------------------------------------------
+    # Hybrid Search Configuration
+    # -------------------------------------------------------------------------
+    retrieval_top_k: int = 20
+    """Number of documents to retrieve via vector similarity."""
+
+    text_search_top_k: int = 20
+    """Number of documents to retrieve via full-text search."""
+
+    hybrid_top_k: int = 40
+    """Total results to consider from both search methods before reranking."""
+
+    rrf_k: int = 60
+    """RRF (Reciprocal Rank Fusion) parameter. Higher = more weight to top results."""
+
+    rerank_top_n: int = 5
+    """Number of documents to return after reranking."""
 
     # -------------------------------------------------------------------------
     # Chunking Configuration
@@ -62,15 +93,6 @@ class Settings(BaseSettings):
 
     chunk_overlap: int = 200
     """Overlap between consecutive chunks in characters."""
-
-    # -------------------------------------------------------------------------
-    # Retrieval Configuration
-    # -------------------------------------------------------------------------
-    retrieval_top_k: int = 20
-    """Number of documents to retrieve initially."""
-
-    rerank_top_n: int = 5
-    """Number of documents to return after reranking."""
 
     # -------------------------------------------------------------------------
     # API Configuration

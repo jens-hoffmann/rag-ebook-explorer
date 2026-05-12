@@ -1,17 +1,26 @@
 """Adapters module."""
 
-from ebook_rag_explorer.adapters.embedding import SentenceTransformerAdapter
-from ebook_rag_explorer.adapters.llm import LangChainLLMAdapter
+from ebook_rag_explorer.adapters.embedding.sentence_transformer_adapter import (
+    SentenceTransformerAdapter,
+)
+from ebook_rag_explorer.adapters.llm.langchain_llm_adapter import LangChainLLMAdapter
 from ebook_rag_explorer.adapters.parsers import EpubParser, PdfParser
-from ebook_rag_explorer.adapters.retrieval import ChromaRetriever, CrossEncoderReranker
-from ebook_rag_explorer.adapters.vectorstore import ChromaAdapter
+from ebook_rag_explorer.adapters.retrieval.cross_encoder_reranker import (
+    CrossEncoderReranker,
+)
+from ebook_rag_explorer.adapters.retrieval.postgres_retriever import PostgresRetriever
+from ebook_rag_explorer.adapters.vectorstore.postgres_adapter import (
+    PostgresAdapter,
+    normalize_collection_id,
+)
 
 __all__ = [
     "PdfParser",
     "EpubParser",
-    "ChromaAdapter",
+    "PostgresAdapter",
+    "normalize_collection_id",
     "SentenceTransformerAdapter",
-    "ChromaRetriever",
+    "PostgresRetriever",
     "CrossEncoderReranker",
     "LangChainLLMAdapter",
 ]

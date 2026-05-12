@@ -59,7 +59,7 @@ class RetrievalService:
 
         return "\n\n---\n\n".join(context_parts)
 
-    def search(
+    async def search(
         self,
         query: str,
         top_k: int | None = None,
@@ -81,23 +81,13 @@ class RetrievalService:
         """
         retrieval_k = top_k or self.retrieval_top_k
 
-        # Step 1: Retrieve (pass collection_id to retriever via the vector store)
-        # Note: The retriever delegates to vector store which supports collection filtering
-        if hasattr(self.retriever, 'vector_store'):
-            query_embedding = self.retriever.embedder.embed_query(query)
-            retrieved_docs = self.retriever.vector_store.similarity_search(
-                query_embedding=query_embedding,
-                k=retrieval_k,
-                book_id=book_id,
-                collection_id=collection_id,
-            )
-        else:
-            # Fallback to regular retrieve
-            retrieved_docs = self.retriever.retrieve(
-                query=query,
-                top_k=retrieval_k,
-                book_id=book_id,
-            )
+        # Step 1: Retrieve (hybrid search)
+        retrieved_docs = await self.retriever.retrieve(
+            query=query,
+            top_k=retrieval_k,
+            book_id=book_id,
+            collection_id=collection_id,
+        )
 
         if not retrieved_docs:
             return SearchResponse(
@@ -140,7 +130,7 @@ class RetrievalService:
                 score=doc.metadata.get("rerank_score", doc.metadata.get("score", 0.0)),
                 metadata={
                     k: v for k, v in doc.metadata.items()
-                    if k not in ("rerank_score", "score")
+                    if k not in ("rerank_score", "score", "rrf_score")
                 },
             )
             for doc in reranked_docs
@@ -172,70 +162,4 @@ class RetrievalService:
         Returns:
             SearchResponse with answer and sources.
         """
-        retrieval_k = top_k or self.retrieval_top_k
-
-        # Step 1: Retrieve (with collection filter if supported)
-        if hasattr(self.retriever, 'vector_store'):
-            query_embedding = self.retriever.embedder.embed_query(query)
-            retrieved_docs = self.retriever.vector_store.similarity_search(
-                query_embedding=query_embedding,
-                k=retrieval_k,
-                book_id=book_id,
-                collection_id=collection_id,
-            )
-        else:
-            retrieved_docs = await self.retriever.aretrieve(
-                query=query,
-                top_k=retrieval_k,
-                book_id=book_id,
-            )
-
-        if not retrieved_docs:
-            return SearchResponse(
-                query=query,
-                answer="I couldn't find any relevant information to answer your question.",
-                sources=[],
-                retrieved_count=0,
-                reranked_count=0,
-            )
-
-        # Step 2: Rerank (sync for now)
-        reranked_docs = self.reranker.rerank(
-            query=query,
-            documents=retrieved_docs,
-            top_n=min(self.rerank_top_n, len(retrieved_docs)),
-        )
-
-        # Step 3: Generate answer (async)
-        context = self._format_context(reranked_docs)
-
-        if self.llm.is_available:
-            try:
-                answer = await self.llm.agenerate(query, context)
-            except Exception:
-                answer = (
-                    "I found some relevant information but couldn't generate a full answer."
-                )
-        else:
-            answer = "LLM not configured. Here are the most relevant passages:"
-
-        # Build source documents
-        sources = [
-            SourceDocument(
-                content=doc.page_content,
-                score=doc.metadata.get("rerank_score", doc.metadata.get("score", 0.0)),
-                metadata={
-                    k: v for k, v in doc.metadata.items()
-                    if k not in ("rerank_score", "score")
-                },
-            )
-            for doc in reranked_docs
-        ]
-
-        return SearchResponse(
-            query=query,
-            answer=answer,
-            sources=sources,
-            retrieved_count=len(retrieved_docs),
-            reranked_count=len(reranked_docs),
-        )
+        return await self.search(query, top_k, book_id, collection_id)

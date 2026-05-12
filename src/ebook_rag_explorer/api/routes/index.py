@@ -28,23 +28,7 @@ async def index_document(
     collection_id: Annotated[str | None, Form(description="Optional collection to organize the book into")] = None,
     indexing_service: IndexingService = Depends(get_indexing_service),
 ) -> IndexResponse:
-    """Upload and index a document.
-
-    This endpoint accepts PDF or EPUB files, parses them, chunks the content,
-    generates embeddings, and stores them in the vector database.
-
-    Args:
-        file: The document file to index.
-        book_id: Optional custom identifier for the book.
-        collection_id: Optional collection to organize the book into.
-        indexing_service: The indexing service dependency.
-
-    Returns:
-        IndexResponse with indexing results.
-
-    Raises:
-        HTTPException: If file format is unsupported or indexing fails.
-    """
+    """Upload and index a document."""
     # Validate file extension
     if not file.filename:
         raise HTTPException(
@@ -65,8 +49,8 @@ async def index_document(
         content = await file.read()
         temp_path.write_bytes(content)
 
-        # Index the book
-        result = indexing_service.index_book(
+        # Index the book (async)
+        result = await indexing_service.index_book(
             file_path=temp_path,
             book_id=book_id,
             collection_id=collection_id,

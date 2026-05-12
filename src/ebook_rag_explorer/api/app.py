@@ -1,7 +1,6 @@
 """FastAPI application factory with lifespan management."""
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,12 +9,16 @@ from ebook_rag_explorer.adapters.embedding.sentence_transformer_adapter import (
     SentenceTransformerAdapter,
 )
 from ebook_rag_explorer.adapters.llm.langchain_llm_adapter import LangChainLLMAdapter
-from ebook_rag_explorer.adapters.retrieval.chroma_retriever import ChromaRetriever
 from ebook_rag_explorer.adapters.retrieval.cross_encoder_reranker import (
     CrossEncoderReranker,
 )
-from ebook_rag_explorer.adapters.vectorstore.chroma_adapter import ChromaAdapter
-from ebook_rag_explorer.api.dependencies import set_embedder, set_retrieval_service, set_vector_store
+from ebook_rag_explorer.adapters.retrieval.postgres_retriever import PostgresRetriever
+from ebook_rag_explorer.adapters.vectorstore.postgres_adapter import PostgresAdapter
+from ebook_rag_explorer.api.dependencies import (
+    set_embedder,
+    set_retrieval_service,
+    set_vector_store,
+)
 from ebook_rag_explorer.config import Settings, get_settings
 from ebook_rag_explorer.services.chunking_service import ChunkingService
 from ebook_rag_explorer.services.indexing_service import IndexingService
@@ -37,22 +40,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Application lifespan handler - initialize services on startup."""
-        # Initialize on startup
-        # Vector store
-        vector_store = ChromaAdapter(settings.chroma_persist_path)
+        # Initialize PostgreSQL adapter
+        vector_store = PostgresAdapter(settings.database_url)
         set_vector_store(vector_store)
 
-        # Embedder
+        # Initialize embedder
         embedder = SentenceTransformerAdapter(settings.embedding_model)
         set_embedder(embedder)
 
-        # Retriever
-        retriever = ChromaRetriever(vector_store, embedder)
+        # Initialize retriever
+        retriever = PostgresRetriever(vector_store, embedder)
 
-        # Reranker
+        # Initialize reranker
         reranker = CrossEncoderReranker(settings.reranker_model)
 
-        # LLM
+        # Initialize LLM
         llm = LangChainLLMAdapter(
             provider=settings.llm_provider,
             model=settings.llm_model,
@@ -60,7 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             base_url=settings.llm_base_url,
         )
 
-        # Retrieval service
+        # Initialize retrieval service
         retrieval_service = RetrievalService(
             retriever=retriever,
             reranker=reranker,
@@ -72,20 +74,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         yield
 
-        # Cleanup on shutdown (if needed)
-        pass
+        # Cleanup on shutdown
+        await vector_store.close()
 
     app = FastAPI(
         title="Ebook RAG Explorer API",
-        description="RAG API for indexing and searching EPUB/PDF ebooks",
-        version="0.1.0",
+        description="RAG API for indexing and searching EPUB/PDF ebooks with PostgreSQL + pgvector",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -102,7 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
-        return {"status": "healthy"}
+        return {"status": "healthy", "database": "postgresql"}
 
     return app
 
