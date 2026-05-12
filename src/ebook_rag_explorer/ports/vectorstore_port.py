@@ -18,6 +18,7 @@ class VectorStore(Protocol):
         documents: list[Document],
         embeddings: list[list[float]],
         book_id: str,
+        collection_id: str | None = None,
     ) -> None:
         """Add documents with their embeddings to the vector store.
 
@@ -25,6 +26,7 @@ class VectorStore(Protocol):
             documents: List of Document objects to store.
             embeddings: List of embedding vectors corresponding to documents.
             book_id: Unique identifier for the book these documents belong to.
+            collection_id: Optional collection to organize the book into.
 
         Raises:
             ValueError: If documents and embeddings have different lengths.
@@ -37,6 +39,7 @@ class VectorStore(Protocol):
         query_embedding: list[float],
         k: int,
         book_id: str | None = None,
+        collection_id: str | None = None,
     ) -> list[Document]:
         """Search for documents similar to the query embedding.
 
@@ -44,6 +47,7 @@ class VectorStore(Protocol):
             query_embedding: The query vector to search for.
             k: Number of results to return.
             book_id: Optional filter to search within a specific book.
+            collection_id: Optional filter to search within a specific collection.
 
         Returns:
             List of similar Document objects, ordered by relevance.
@@ -77,6 +81,25 @@ class VectorStore(Protocol):
 
         Returns:
             Number of chunks for the book, or 0 if not found.
+        """
+        ...
+
+    def list_collections(self) -> list[dict]:
+        """List all collections with their metadata.
+
+        Returns:
+            List of dictionaries containing collection info.
+        """
+        ...
+
+    def delete_collection(self, collection_id: str) -> bool:
+        """Delete all documents belonging to a specific collection.
+
+        Args:
+            collection_id: Collection identifier to delete.
+
+        Returns:
+            True if the collection was found and deleted, False otherwise.
         """
         ...
 

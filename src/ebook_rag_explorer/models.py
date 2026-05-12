@@ -24,6 +24,10 @@ class SearchRequest(BaseModel):
         le=100,
         description="Override default number of documents to retrieve",
     )
+    collection_id: str | None = Field(
+        default=None,
+        description="Filter search to a specific collection",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -61,9 +65,28 @@ class BookInfo(BaseModel):
         default=0,
         description="Number of chunks indexed for this book",
     )
+    collection_id: str | None = Field(
+        default=None,
+        description="Collection this book belongs to",
+    )
     metadata: dict = Field(
         default_factory=dict,
         description="Additional book metadata (author, pages, etc.)",
+    )
+
+
+class CollectionInfo(BaseModel):
+    """Information about a collection of books."""
+
+    id: str = Field(description="Collection identifier (normalized name)")
+    name: str = Field(description="Display name of the collection")
+    book_count: int = Field(
+        default=0,
+        description="Number of books in this collection",
+    )
+    chunk_count: int = Field(
+        default=0,
+        description="Total number of chunks across all books",
     )
 
 

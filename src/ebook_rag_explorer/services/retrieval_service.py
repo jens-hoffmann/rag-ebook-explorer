@@ -64,6 +64,7 @@ class RetrievalService:
         query: str,
         top_k: int | None = None,
         book_id: str | None = None,
+        collection_id: str | None = None,
     ) -> SearchResponse:
         """Execute the full RAG search pipeline.
 
@@ -73,18 +74,30 @@ class RetrievalService:
             query: The search query.
             top_k: Optional override for number of documents to retrieve.
             book_id: Optional filter to search within a specific book.
+            collection_id: Optional filter to search within a specific collection.
 
         Returns:
             SearchResponse with answer and sources.
         """
         retrieval_k = top_k or self.retrieval_top_k
 
-        # Step 1: Retrieve
-        retrieved_docs = self.retriever.retrieve(
-            query=query,
-            top_k=retrieval_k,
-            book_id=book_id,
-        )
+        # Step 1: Retrieve (pass collection_id to retriever via the vector store)
+        # Note: The retriever delegates to vector store which supports collection filtering
+        if hasattr(self.retriever, 'vector_store'):
+            query_embedding = self.retriever.embedder.embed_query(query)
+            retrieved_docs = self.retriever.vector_store.similarity_search(
+                query_embedding=query_embedding,
+                k=retrieval_k,
+                book_id=book_id,
+                collection_id=collection_id,
+            )
+        else:
+            # Fallback to regular retrieve
+            retrieved_docs = self.retriever.retrieve(
+                query=query,
+                top_k=retrieval_k,
+                book_id=book_id,
+            )
 
         if not retrieved_docs:
             return SearchResponse(
@@ -146,6 +159,7 @@ class RetrievalService:
         query: str,
         top_k: int | None = None,
         book_id: str | None = None,
+        collection_id: str | None = None,
     ) -> SearchResponse:
         """Asynchronously execute the full RAG search pipeline.
 
@@ -153,18 +167,28 @@ class RetrievalService:
             query: The search query.
             top_k: Optional override for number of documents to retrieve.
             book_id: Optional filter to search within a specific book.
+            collection_id: Optional filter to search within a specific collection.
 
         Returns:
             SearchResponse with answer and sources.
         """
         retrieval_k = top_k or self.retrieval_top_k
 
-        # Step 1: Retrieve (async)
-        retrieved_docs = await self.retriever.aretrieve(
-            query=query,
-            top_k=retrieval_k,
-            book_id=book_id,
-        )
+        # Step 1: Retrieve (with collection filter if supported)
+        if hasattr(self.retriever, 'vector_store'):
+            query_embedding = self.retriever.embedder.embed_query(query)
+            retrieved_docs = self.retriever.vector_store.similarity_search(
+                query_embedding=query_embedding,
+                k=retrieval_k,
+                book_id=book_id,
+                collection_id=collection_id,
+            )
+        else:
+            retrieved_docs = await self.retriever.aretrieve(
+                query=query,
+                top_k=retrieval_k,
+                book_id=book_id,
+            )
 
         if not retrieved_docs:
             return SearchResponse(

@@ -20,16 +20,24 @@ router = APIRouter()
 )
 async def list_books(
     vector_store: Annotated[VectorStore, Depends(get_vector_store)],
+    collection_id: Annotated[str | None, Query(description="Filter by collection ID")] = None,
 ) -> list[BookInfo]:
     """List all indexed books.
 
     Args:
         vector_store: The vector store dependency.
+        collection_id: Optional filter to list books in a specific collection.
 
     Returns:
         List of BookInfo objects.
     """
     books_data = vector_store.list_books()
+
+    # Filter by collection_id if provided
+    if collection_id:
+        from ebook_rag_explorer.adapters.vectorstore.chroma_adapter import normalize_collection_id
+        normalized = normalize_collection_id(collection_id)
+        books_data = [b for b in books_data if b.get("collection_id") == normalized]
 
     return [
         BookInfo(
@@ -37,6 +45,7 @@ async def list_books(
             title=book.get("title") or None,
             format=book.get("format", "unknown"),
             chunk_count=book.get("chunk_count", 0),
+            collection_id=book.get("collection_id"),
             metadata={
                 "author": book.get("author", ""),
             },

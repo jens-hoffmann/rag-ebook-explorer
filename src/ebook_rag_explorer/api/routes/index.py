@@ -25,6 +25,7 @@ router = APIRouter()
 async def index_document(
     file: Annotated[UploadFile, File(description="PDF or EPUB file to index")],
     book_id: Annotated[str | None, Form(description="Optional custom book ID")] = None,
+    collection_id: Annotated[str | None, Form(description="Optional collection to organize the book into")] = None,
     indexing_service: IndexingService = Depends(get_indexing_service),
 ) -> IndexResponse:
     """Upload and index a document.
@@ -35,6 +36,7 @@ async def index_document(
     Args:
         file: The document file to index.
         book_id: Optional custom identifier for the book.
+        collection_id: Optional collection to organize the book into.
         indexing_service: The indexing service dependency.
 
     Returns:
@@ -67,6 +69,7 @@ async def index_document(
         result = indexing_service.index_book(
             file_path=temp_path,
             book_id=book_id,
+            collection_id=collection_id,
         )
 
         return IndexResponse(

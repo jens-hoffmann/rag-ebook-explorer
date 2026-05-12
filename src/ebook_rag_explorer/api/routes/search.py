@@ -48,6 +48,7 @@ async def search_documents(
         response = retrieval_service.search(
             query=request.query,
             top_k=request.top_k,
+            collection_id=request.collection_id,
         )
         return response
 

@@ -319,3 +319,134 @@ class TestBooksEndpoint:
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
+
+
+class TestCollectionsEndpoint:
+    """Tests for the collections endpoint."""
+
+    def test_list_collections_empty(self, temp_persist_dir, mock_embedder, mock_llm, mock_reranker):
+        """Test listing collections when none exist."""
+        app, _ = create_test_app_with_deps(temp_persist_dir, mock_embedder, mock_llm, mock_reranker)
+        client = TestClient(app)
+        
+        response = client.get("/api/collections")
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_list_collections_with_data(self, temp_persist_dir, mock_embedder, mock_llm, mock_reranker):
+        """Test listing collections with indexed content."""
+        app, _ = create_test_app_with_deps(temp_persist_dir, mock_embedder, mock_llm, mock_reranker)
+        client = TestClient(app)
+        
+        # Index documents with collection
+        with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
+            mock_doc = MagicMock()
+            mock_doc.metadata = {"title": "Test Book"}
+            mock_doc.__len__ = MagicMock(return_value=1)
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = "Test content."
+            mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+            mock_doc.__exit__ = MagicMock(return_value=False)
+            mock_doc.__getitem__ = MagicMock(return_value=mock_page)
+            mock_fitz.return_value = mock_doc
+
+            test_file = temp_persist_dir / "test.pdf"
+            test_file.write_text("dummy")
+
+            with open(test_file, "rb") as f:
+                response = client.post(
+                    "/api/index",
+                    files={"file": ("test.pdf", f, "application/pdf")},
+                    data={"collection_id": "My Collection"},
+                )
+                assert response.status_code == 200
+
+        # List collections
+        response = client.get("/api/collections")
+
+        assert response.status_code == 200
+        collections = response.json()
+        assert len(collections) == 1
+        assert collections[0]["id"] == "my_collection"
+        assert collections[0]["name"] == "my_collection"
+
+    def test_delete_collection_not_found(self, temp_persist_dir, mock_embedder, mock_llm, mock_reranker):
+        """Test deleting a non-existent collection."""
+        app, _ = create_test_app_with_deps(temp_persist_dir, mock_embedder, mock_llm, mock_reranker)
+        client = TestClient(app)
+        
+        response = client.delete("/api/collections/non-existent")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_index_with_collection(self, temp_persist_dir, mock_embedder, mock_llm, mock_reranker):
+        """Test indexing a document with a collection."""
+        app, _ = create_test_app_with_deps(temp_persist_dir, mock_embedder, mock_llm, mock_reranker)
+        client = TestClient(app)
+        
+        with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
+            mock_doc = MagicMock()
+            mock_doc.metadata = {"title": "Test Book"}
+            mock_doc.__len__ = MagicMock(return_value=1)
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = "Content"
+            mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+            mock_doc.__exit__ = MagicMock(return_value=False)
+            mock_doc.__getitem__ = MagicMock(return_value=mock_page)
+            mock_fitz.return_value = mock_doc
+
+            test_file = temp_persist_dir / "test.pdf"
+            test_file.write_text("dummy")
+
+            with open(test_file, "rb") as f:
+                response = client.post(
+                    "/api/index",
+                    files={"file": ("test.pdf", f, "application/pdf")},
+                    data={"collection_id": "TestCollection"},
+                )
+
+            assert response.status_code == 200
+            # Verify book was indexed with collection
+            response = client.get("/api/books")
+            books = response.json()
+            assert len(books) == 1
+            assert books[0]["collection_id"] == "testcollection"
+
+    def test_search_with_collection_filter(self, temp_persist_dir, mock_embedder, mock_llm, mock_reranker):
+        """Test searching with collection filter."""
+        app, _ = create_test_app_with_deps(temp_persist_dir, mock_embedder, mock_llm, mock_reranker)
+        client = TestClient(app)
+        
+        # Index document to collection
+        with patch("ebook_rag_explorer.adapters.parsers.pdf_parser.fitz.open") as mock_fitz:
+            mock_doc = MagicMock()
+            mock_doc.metadata = {"title": "Test Book"}
+            mock_doc.__len__ = MagicMock(return_value=1)
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = "Python programming content"
+            mock_doc.__enter__ = MagicMock(return_value=mock_doc)
+            mock_doc.__exit__ = MagicMock(return_value=False)
+            mock_doc.__getitem__ = MagicMock(return_value=mock_page)
+            mock_fitz.return_value = mock_doc
+
+            test_file = temp_persist_dir / "test.pdf"
+            test_file.write_text("dummy")
+
+            with open(test_file, "rb") as f:
+                client.post(
+                    "/api/index",
+                    files={"file": ("test.pdf", f, "application/pdf")},
+                    data={"collection_id": "PythonCollection"},
+                )
+
+        # Search within collection
+        response = client.post(
+            "/api/search",
+            json={"query": "What is this about?", "collection_id": "PythonCollection"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["query"] == "What is this about?"

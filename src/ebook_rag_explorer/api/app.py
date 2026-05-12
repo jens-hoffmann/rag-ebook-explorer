@@ -92,11 +92,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # Import and include routers
-    from ebook_rag_explorer.api.routes import books, index, search
+    from ebook_rag_explorer.api.routes import books, collections, index, search
 
     app.include_router(index.router, prefix="/api", tags=["indexing"])
     app.include_router(search.router, prefix="/api", tags=["search"])
     app.include_router(books.router, prefix="/api", tags=["books"])
+    app.include_router(collections.router, prefix="/api", tags=["collections"])
 
     @app.get("/health")
     async def health_check():

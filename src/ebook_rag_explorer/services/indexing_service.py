@@ -57,7 +57,12 @@ class IndexingService:
 
         raise ValueError(f"Unsupported file format: {extension}")
 
-    def index_book(self, file_path: Path, book_id: str | None = None) -> dict:
+    def index_book(
+        self,
+        file_path: Path,
+        book_id: str | None = None,
+        collection_id: str | None = None,
+    ) -> dict:
         """Index an ebook file into the vector store.
 
         This orchestrates the full pipeline: parse → chunk → embed → store.
@@ -66,6 +71,7 @@ class IndexingService:
             file_path: Path to the ebook file.
             book_id: Optional unique identifier for the book.
                      If not provided, a UUID will be generated.
+            collection_id: Optional collection to organize the book into.
 
         Returns:
             Dictionary with indexing results:
@@ -74,6 +80,7 @@ class IndexingService:
                 "title": str | None,
                 "format": str,
                 "chunks_indexed": int,
+                "collection_id": str | None,
             }
 
         Raises:
@@ -99,6 +106,7 @@ class IndexingService:
                 "title": None,
                 "format": parser.format_name,
                 "chunks_indexed": 0,
+                "collection_id": collection_id,
             }
 
         # Extract title from first document metadata
@@ -113,20 +121,22 @@ class IndexingService:
                 "title": title,
                 "format": parser.format_name,
                 "chunks_indexed": 0,
+                "collection_id": collection_id,
             }
 
         # Step 3: Embed
         texts = [chunk.page_content for chunk in chunks]
         embeddings = self.embedder.embed_documents(texts)
 
-        # Step 4: Store
-        self.vector_store.add_documents(chunks, embeddings, book_id)
+        # Step 4: Store (with collection_id)
+        self.vector_store.add_documents(chunks, embeddings, book_id, collection_id)
 
         return {
             "book_id": book_id,
             "title": title,
             "format": parser.format_name,
             "chunks_indexed": len(chunks),
+            "collection_id": collection_id,
         }
 
     def delete_book(self, book_id: str) -> bool:
@@ -147,3 +157,22 @@ class IndexingService:
             List of book information dictionaries.
         """
         return self.vector_store.list_books()
+
+    def list_collections(self) -> list[dict]:
+        """List all collections.
+
+        Returns:
+            List of collection information dictionaries.
+        """
+        return self.vector_store.list_collections()
+
+    def delete_collection(self, collection_id: str) -> bool:
+        """Delete a collection and all its books.
+
+        Args:
+            collection_id: The collection identifier to delete.
+
+        Returns:
+            True if the collection was found and deleted, False otherwise.
+        """
+        return self.vector_store.delete_collection(collection_id)
