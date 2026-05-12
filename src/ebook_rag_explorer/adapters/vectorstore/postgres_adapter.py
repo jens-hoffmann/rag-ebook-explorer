@@ -1,5 +1,6 @@
 """PostgreSQL + pgvector adapter with hybrid search."""
 
+import json
 import re
 import uuid
 from typing import Any
@@ -132,7 +133,7 @@ class PostgresAdapter(VectorStore):
                     INSERT INTO documents 
                     (chunk_id, book_id, collection_id, content, embedding, 
                      chunk_index, total_chunks, source_metadata)
-                    VALUES ($1, $2, $3, $4, $5::vector, $6, $7, $8)
+                    VALUES ($1, $2, $3, $4, $5::vector, $6, $7, $8::jsonb)
                     ON CONFLICT (chunk_id) DO UPDATE SET
                         content = EXCLUDED.content,
                         embedding = EXCLUDED.embedding,
@@ -145,8 +146,17 @@ class PostgresAdapter(VectorStore):
                     self._format_vector(embedding),
                     i,
                     len(documents),
-                    doc.metadata,
+                    json.dumps(doc.metadata) if doc.metadata else "{}",
                 )
+
+            # Update book chunk count
+            await conn.execute(
+                """
+                UPDATE books SET chunk_count = $1 WHERE id = $2
+                """,
+                len(documents),
+                book_id,
+            )
 
     async def _vector_search(
         self,
@@ -203,7 +213,7 @@ class PostgresAdapter(VectorStore):
 
         results = []
         for row in rows:
-            metadata = dict(row["source_metadata"]) if row["source_metadata"] else {}
+            metadata = row["source_metadata"] if isinstance(row["source_metadata"], dict) else {}
             metadata.update({
                 "chunk_id": row["chunk_id"],
                 "book_id": row["book_id"],
@@ -275,7 +285,7 @@ class PostgresAdapter(VectorStore):
 
         results = []
         for row in rows:
-            metadata = dict(row["source_metadata"]) if row["source_metadata"] else {}
+            metadata = row["source_metadata"] if isinstance(row["source_metadata"], dict) else {}
             metadata.update({
                 "chunk_id": row["chunk_id"],
                 "book_id": row["book_id"],
@@ -437,7 +447,7 @@ class PostgresAdapter(VectorStore):
                 "author": row["author"],
                 "format": row["format"],
                 "collection_id": row["collection_id"],
-                "metadata": dict(row["metadata"]) if row["metadata"] else {},
+                "metadata": row["metadata"] if isinstance(row["metadata"], dict) else {},
                 "chunk_count": row["chunk_count"],
             }
             for row in rows
