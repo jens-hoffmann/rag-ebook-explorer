@@ -15,6 +15,7 @@ WORKDIR /app
 
 # Copy dependency files
 COPY pyproject.toml ./
+COPY README.md ./
 
 # Create virtual environment and install dependencies
 RUN uv venv /app/.venv
@@ -43,6 +44,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy application code
 COPY src/ ./src/
 COPY tests/ ./tests/
+COPY README.md ./
 COPY tox.ini ./
 
 # Create directories for model cache and temp files
